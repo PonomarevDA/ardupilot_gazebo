@@ -21,6 +21,7 @@
 
 #include <gz/sim/System.hh>
 #include <sdf/sdf.hh>
+#include "hitl_application.hpp"
 
 namespace gz
 {
@@ -72,7 +73,7 @@ class ArduPilotPluginPrivate;
 /// <imuName>     scoped name for the imu sensor
 /// <connectionTimeoutMaxCount> timeout before giving up on
 ///                             controller synchronization
-class GZ_SIM_VISIBLE ArduPilotPlugin:
+class GZ_SIM_VISIBLE ArduPilotCyphalPlugin:
   public gz::sim::System,
   public gz::sim::ISystemConfigure,
   public gz::sim::ISystemPostUpdate,
@@ -80,10 +81,10 @@ class GZ_SIM_VISIBLE ArduPilotPlugin:
   public gz::sim::ISystemReset
 {
   /// \brief Constructor.
-  public: ArduPilotPlugin();
+  public: ArduPilotCyphalPlugin();
 
   /// \brief Destructor.
-  public: ~ArduPilotPlugin();
+  public: ~ArduPilotCyphalPlugin();
 
   public: void Reset(const UpdateInfo &_info,
                       EntityComponentManager &_ecm) final;
@@ -146,18 +147,17 @@ class GZ_SIM_VISIBLE ArduPilotPlugin:
   private: void UpdateMotorCommands(const servo_packet &_pkt);
 
   /// \brief Create the state JSON
-  private: void CreateStateJSON(
+  private: void ProcessCyphal(
       double _simTime,
-      const gz::sim::EntityComponentManager &_ecm) const;
-
-  /// \brief Send state to ArduPilot
-  private: void SendState() const;
+      const gz::sim::EntityComponentManager &_ecm);
 
   /// \brief Initialise flight dynamics model socket
   private: bool InitSockets(sdf::ElementPtr _sdf) const;
 
   /// \brief Private data pointer.
   private: std::unique_ptr<ArduPilotPluginPrivate> dataPtr;
+
+  private: HitlApplication cyphal_application;
 };
 
 }  // namespace systems

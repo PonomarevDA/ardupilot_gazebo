@@ -14,7 +14,7 @@
  * limitations under the License.
  *
 */
-#include "ArduPilotPlugin.hh"
+#include "ArduPilotCyphalPlugin.hh"
 
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
@@ -65,15 +65,15 @@
 #define MAX_SERVO_CHANNELS 16
 
 // Register plugin
-GZ_ADD_PLUGIN(gz::sim::systems::ArduPilotPlugin,
+GZ_ADD_PLUGIN(gz::sim::systems::ArduPilotCyphalPlugin,
               gz::sim::System,
-              gz::sim::systems::ArduPilotPlugin::ISystemConfigure,
-              gz::sim::systems::ArduPilotPlugin::ISystemPostUpdate,
-              gz::sim::systems::ArduPilotPlugin::ISystemReset,
-              gz::sim::systems::ArduPilotPlugin::ISystemPreUpdate)
+              gz::sim::systems::ArduPilotCyphalPlugin::ISystemConfigure,
+              gz::sim::systems::ArduPilotCyphalPlugin::ISystemPostUpdate,
+              gz::sim::systems::ArduPilotCyphalPlugin::ISystemReset,
+              gz::sim::systems::ArduPilotCyphalPlugin::ISystemPreUpdate)
 // Add plugin alias so that we can refer to the plugin without the version
 // namespace
-GZ_ADD_PLUGIN_ALIAS(gz::sim::systems::ArduPilotPlugin, "ArduPilotPlugin")
+GZ_ADD_PLUGIN_ALIAS(gz::sim::systems::ArduPilotCyphalPlugin, "ArduPilotCyphalPlugin")
 
 /// \brief class Control is responsible for controlling a joint
 class Control
@@ -328,9 +328,6 @@ class gz::sim::systems::ArduPilotPluginPrivate
   /// \brief Last received frame count from the ArduPilot controller
   public: uint32_t fcu_frame_count = -1;
 
-  /// \brief Last sent JSON string, so we can resend if needed.
-  public: std::string json_str;
-
   /// \brief A copy of the most recently received signal.
   public: int signal{0};
 
@@ -346,18 +343,18 @@ class gz::sim::systems::ArduPilotPluginPrivate
 };
 
 /////////////////////////////////////////////////
-gz::sim::systems::ArduPilotPlugin::ArduPilotPlugin()
+gz::sim::systems::ArduPilotCyphalPlugin::ArduPilotCyphalPlugin()
   : dataPtr(new ArduPilotPluginPrivate())
 {
 }
 
 /////////////////////////////////////////////////
-gz::sim::systems::ArduPilotPlugin::~ArduPilotPlugin()
+gz::sim::systems::ArduPilotCyphalPlugin::~ArduPilotCyphalPlugin()
 {
 }
 
 /////////////////////////////////////////////////
-void gz::sim::systems::ArduPilotPlugin::Reset(const UpdateInfo &_info,
+void gz::sim::systems::ArduPilotCyphalPlugin::Reset(const UpdateInfo &_info,
                                               EntityComponentManager &_ecm)
 {
   if (!_ecm.EntityHasComponentType(this->dataPtr->imuLink,
@@ -403,19 +400,21 @@ void gz::sim::systems::ArduPilotPlugin::Reset(const UpdateInfo &_info,
 }
 
 /////////////////////////////////////////////////
-void gz::sim::systems::ArduPilotPlugin::Configure(
+void gz::sim::systems::ArduPilotCyphalPlugin::Configure(
     const gz::sim::Entity &_entity,
     const std::shared_ptr<const sdf::Element> &_sdf,
     gz::sim::EntityComponentManager &_ecm,
     gz::sim::EventManager &/*&_eventMgr*/)
 {
+  cyphal_application.init(-35.3632621, +149.1652374, 584.19);
+
   // Make a clone so that we can call non-const methods
   sdf::ElementPtr sdfClone = _sdf->Clone();
 
   this->dataPtr->model = gz::sim::Model(_entity);
   if (!this->dataPtr->model.Valid(_ecm))
   {
-    gzerr << "ArduPilotPlugin should be attached to a model "
+    gzerr << "ArduPilotCyphalPlugin should be attached to a model "
       << "entity. Failed to initialize." << "\n";
     return;
   }
@@ -487,7 +486,7 @@ void gz::sim::systems::ArduPilotPlugin::Configure(
 }
 
 /////////////////////////////////////////////////
-void gz::sim::systems::ArduPilotPlugin::LoadControlChannels(
+void gz::sim::systems::ArduPilotCyphalPlugin::LoadControlChannels(
     sdf::ElementPtr _sdf,
     gz::sim::EntityComponentManager &_ecm)
 {
@@ -759,7 +758,7 @@ void gz::sim::systems::ArduPilotPlugin::LoadControlChannels(
 }
 
 /////////////////////////////////////////////////
-void gz::sim::systems::ArduPilotPlugin::LoadImuSensors(
+void gz::sim::systems::ArduPilotCyphalPlugin::LoadImuSensors(
     sdf::ElementPtr _sdf,
     gz::sim::EntityComponentManager &/*_ecm*/)
 {
@@ -768,80 +767,14 @@ void gz::sim::systems::ArduPilotPlugin::LoadImuSensors(
 }
 
 /////////////////////////////////////////////////
-void gz::sim::systems::ArduPilotPlugin::LoadGpsSensors(
+void gz::sim::systems::ArduPilotCyphalPlugin::LoadGpsSensors(
     sdf::ElementPtr /*_sdf*/,
     gz::sim::EntityComponentManager &/*_ecm*/)
 {
-  /*
-  NOT MERGED IN MASTER YET
-  // Get GPS
-  std::string gpsName = _sdf->Get("imuName",
-      static_cast<std::string>("gps_sensor")).first;
-  std::vector<std::string> gpsScopedName =
-      SensorScopedName(this->dataPtr->model, gpsName);
-  if (gpsScopedName.size() > 1)
-  {
-    gzwarn << "[" << this->dataPtr->modelName << "] "
-           << "multiple names match [" << gpsName << "] using first found"
-           << " name.\n";
-    for (unsigned k = 0; k < gpsScopedName.size(); ++k)
-    {
-      gzwarn << "  sensor " << k << " [" << gpsScopedName[k] << "].\n";
-    }
-  }
-
-  if (gpsScopedName.size() > 0)
-  {
-    this->dataPtr->gpsSensor = std::dynamic_pointer_cast<sensors::GpsSensor>
-      (sensors::SensorManager::Instance()->GetSensor(gpsScopedName[0]));
-  }
-
-  if (!this->dataPtr->gpsSensor)
-  {
-    if (gpsScopedName.size() > 1)
-    {
-      gzwarn << "[" << this->dataPtr->modelName << "] "
-             << "first gps_sensor scoped name [" << gpsScopedName[0]
-             << "] not found, trying the rest of the sensor names.\n";
-      for (unsigned k = 1; k < gpsScopedName.size(); ++k)
-      {
-        this->dataPtr->gpsSensor =
-            std::dynamic_pointer_cast<sensors::GpsSensor>
-          (sensors::SensorManager::Instance()->GetSensor(gpsScopedName[k]));
-        if (this->dataPtr->gpsSensor)
-        {
-          gzwarn << "found [" << gpsScopedName[k] << "]\n";
-          break;
-        }
-      }
-    }
-
-    if (!this->dataPtr->gpsSensor)
-    {
-      gzwarn << "[" << this->dataPtr->modelName << "] "
-             << "gps_sensor scoped name [" << gpsName
-             << "] not found, trying unscoped name.\n" << "\n";
-      this->dataPtr->gpsSensor = std::dynamic_pointer_cast<sensors::GpsSensor>
-        (sensors::SensorManager::Instance()->GetSensor(gpsName));
-    }
-
-    if (!this->dataPtr->gpsSensor)
-    {
-      gzwarn << "[" << this->dataPtr->modelName << "] "
-             << "gps [" << gpsName
-             << "] not found, skipping gps support.\n" << "\n";
-    }
-    else
-    {
-      gzwarn << "[" << this->dataPtr->modelName << "] "
-             << "  found "  << " [" << gpsName << "].\n";
-    }
-  }
-  */
 }
 
 /////////////////////////////////////////////////
-void gz::sim::systems::ArduPilotPlugin::LoadRangeSensors(
+void gz::sim::systems::ArduPilotCyphalPlugin::LoadRangeSensors(
     sdf::ElementPtr _sdf,
     gz::sim::EntityComponentManager &/*_ecm*/)
 {
@@ -957,7 +890,7 @@ void gz::sim::systems::ArduPilotPlugin::LoadRangeSensors(
 }
 
 /////////////////////////////////////////////////
-void gz::sim::systems::ArduPilotPlugin::PreUpdate(
+void gz::sim::systems::ArduPilotCyphalPlugin::PreUpdate(
     const gz::sim::UpdateInfo &_info,
     gz::sim::EntityComponentManager &_ecm)
 {
@@ -1099,27 +1032,25 @@ void gz::sim::systems::ArduPilotPlugin::PreUpdate(
 }
 
 /////////////////////////////////////////////////
-void gz::sim::systems::ArduPilotPlugin::PostUpdate(
+void gz::sim::systems::ArduPilotCyphalPlugin::PostUpdate(
     const gz::sim::UpdateInfo &_info,
     const gz::sim::EntityComponentManager &_ecm)
 {
     std::lock_guard<std::mutex> lock(this->dataPtr->mutex);
 
     // Publish the new state.
-    if (!_info.paused && _info.simTime > this->dataPtr->lastControllerUpdateTime
-        && this->dataPtr->arduPilotOnline)
+    if (!_info.paused && _info.simTime > this->dataPtr->lastControllerUpdateTime)
     {
-        double t =
-            std::chrono::duration_cast<std::chrono::duration<double>>(
-                _info.simTime).count();
-        this->CreateStateJSON(t, _ecm);
-        this->SendState();
-        this->dataPtr->lastControllerUpdateTime = _info.simTime;
+      double t =
+          std::chrono::duration_cast<std::chrono::duration<double>>(
+              _info.simTime).count();
+      this->ProcessCyphal(t, _ecm);
+      this->dataPtr->lastControllerUpdateTime = _info.simTime;
     }
 }
 
 /////////////////////////////////////////////////
-void gz::sim::systems::ArduPilotPlugin::ResetPIDs()
+void gz::sim::systems::ArduPilotCyphalPlugin::ResetPIDs()
 {
   // Reset velocity PID for controls
   for (size_t i = 0; i < this->dataPtr->controls.size(); ++i)
@@ -1130,7 +1061,7 @@ void gz::sim::systems::ArduPilotPlugin::ResetPIDs()
 }
 
 /////////////////////////////////////////////////
-bool gz::sim::systems::ArduPilotPlugin::InitSockets(sdf::ElementPtr _sdf) const
+bool gz::sim::systems::ArduPilotCyphalPlugin::InitSockets(sdf::ElementPtr _sdf) const
 {
     // configure port
     this->dataPtr->sock.set_blocking(false);
@@ -1171,7 +1102,7 @@ bool gz::sim::systems::ArduPilotPlugin::InitSockets(sdf::ElementPtr _sdf) const
 }
 
 /////////////////////////////////////////////////
-void gz::sim::systems::ArduPilotPlugin::ApplyMotorForces(
+void gz::sim::systems::ArduPilotCyphalPlugin::ApplyMotorForces(
     const double _dt,
     gz::sim::EntityComponentManager &_ecm)
 {
@@ -1280,172 +1211,53 @@ void gz::sim::systems::ArduPilotPlugin::ApplyMotorForces(
   }
 }
 
+static gz::sim::systems::servo_packet pkt{.frame_rate = 1100, .frame_count=0};
+
 /////////////////////////////////////////////////
-bool gz::sim::systems::ArduPilotPlugin::ReceiveServoPacket()
+bool gz::sim::systems::ArduPilotCyphalPlugin::ReceiveServoPacket()
 {
-    // Added detection for whether ArduPilot is online or not.
-    // If ArduPilot is detected (receive of fdm packet from someone),
-    // then socket receive wait time is increased from 1ms to 1 sec
-    // to accomodate network jitter.
-    // If ArduPilot is not detected, receive call blocks for 1ms
-    // on each call.
-    // Once ArduPilot presence is detected, it takes this many
-    // missed receives before declaring the FCS offline.
+  std::array<uint16_t, 16> servo_pwm;
+  uint32_t elapsed_ms;
 
-    uint32_t waitMs;
-    if (this->dataPtr->arduPilotOnline)
-    {
-        // Increase timeout for recv once we detect a packet from ArduPilot FCS.
-        // If this value is too high then it will block the main Gazebo
-        // update loop and adversely affect the RTF.
-        waitMs = 10;
+  uint32_t crnt_sp_recv_counter = cyphal_application.get_servo_pwm(servo_pwm);
+  static uint32_t recv_counter = 0;
+  recv_counter++;
+
+  static std::chrono::steady_clock::time_point last_hint_time = std::chrono::steady_clock::now();
+  std::chrono::steady_clock::time_point time_now = std::chrono::steady_clock::now();
+  elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - last_hint_time).count();
+  if (elapsed_ms > 1000) {
+    static uint32_t prev_sp_recv_counter = 0;
+    uint32_t sp_frame_rate = crnt_sp_recv_counter - prev_sp_recv_counter;
+    if (sp_frame_rate < 200 * 0.95) {
+      gzwarn << "servo: sp_recv_counter=" << sp_frame_rate << ", recv=" << recv_counter << ", " << "\n";
+    } else {
+      gzmsg  << "servo: sp_recv_counter=" << sp_frame_rate << ", recv=" << recv_counter << ", " << "\n";
     }
-    else
-    {
-        // Otherwise skip quickly and do not set control force.
-        waitMs = 1;
-    }
+    last_hint_time = time_now;
+    recv_counter = 0;
+    prev_sp_recv_counter = crnt_sp_recv_counter;
+  }
 
-    servo_packet pkt;
-    auto recvSize = this->dataPtr->sock.recv(&pkt,
-        sizeof(servo_packet), waitMs);
+  pkt.frame_count++;
+  for (size_t idx = 0; idx < 16; idx++) {
+    pkt.pwm[idx] = servo_pwm[idx];
+  }
 
-    this->dataPtr->sock.last_recv_address(this->dataPtr->fcu_address,
-        this->dataPtr->fcu_port_out);
+  this->dataPtr->arduPilotOnline = true;
 
-    // drain the socket in the case we're backed up
-    int counter = 0;
-    while (true)
-    {
-        servo_packet last_pkt;
-        auto recvSize_last = this->dataPtr->sock.recv(&last_pkt,
-            sizeof(servo_packet), 0ul);
-        if (recvSize_last == -1)
-        {
-            break;
-        }
-        counter++;
-        pkt = last_pkt;
-        recvSize = recvSize_last;
-    }
-    if (counter > 0)
-    {
-        gzwarn << "[" << this->dataPtr->modelName << "] "
-            << "Drained n packets: " << counter << "\n";
-    }
+  if (pkt.frame_count == this->dataPtr->fcu_frame_count)
+  {
+      return false;
+  }
+  this->dataPtr->fcu_frame_count = pkt.frame_count;
+  this->UpdateMotorCommands(pkt);
 
-    // didn't receive a packet, increment timeout count if online, then return
-    if (recvSize == -1)
-    {
-        if (this->dataPtr->arduPilotOnline)
-        {
-            if (++this->dataPtr->connectionTimeoutCount >
-            this->dataPtr->connectionTimeoutMaxCount)
-            {
-                this->dataPtr->connectionTimeoutCount = 0;
-
-                // for lock-step resend last state rather than time out
-                if (this->dataPtr->isLockStep)
-                {
-                    this->SendState();
-                }
-                else
-                {
-                    this->dataPtr->arduPilotOnline = false;
-                    gzwarn << "[" << this->dataPtr->modelName << "] "
-                        << "Broken ArduPilot connection,"
-                        << " resetting motor control.\n";
-                    this->ResetPIDs();
-                }
-            }
-        }
-        return false;
-    }
-
-#if DEBUG_JSON_IO
-    // debug: inspect sitl packet
-    std::ostringstream oss;
-    oss << "recv " << recvSize << " bytes from "
-        << this->dataPtr->fcu_address << ":"
-        << this->dataPtr->fcu_port_out << "\n";
-    // oss << "magic: " << pkt.magic << "\n";
-    // oss << "frame_rate: " << pkt.frame_rate << "\n";
-    oss << "frame_count: " << pkt.frame_count << "\n";
-    // oss << "pwm: [";
-    // for (auto i=0; i<MAX_SERVO_CHANNELS - 1; ++i) {
-    //     oss << pkt.pwm[i] << ", ";
-    // }
-    // oss << pkt.pwm[MAX_SERVO_CHANNELS - 1] << "]\n";
-    gzdbg << "\n" << oss.str();
-#endif
-
-    // check magic, return if invalid
-    const uint16_t magic = 18458;
-    if (magic != pkt.magic)
-    {
-        gzwarn << "Incorrect protocol magic "
-            << pkt.magic << " should be "
-            << magic << "\n";
-        return false;
-    }
-
-    // the controller is online
-    if (!this->dataPtr->arduPilotOnline)
-    {
-        this->dataPtr->arduPilotOnline = true;
-
-        gzlog << "[" << this->dataPtr->modelName << "] "
-            << "Connected to ArduPilot controller @ "
-            << this->dataPtr->fcu_address << ":" << this->dataPtr->fcu_port_out
-            << "\n";
-    }
-
-    // update frame rate
-    this->dataPtr->fcu_frame_rate = pkt.frame_rate;
-
-    // check for controller reset
-    if (pkt.frame_count < this->dataPtr->fcu_frame_count)
-    {
-        /// \todo(anyone) implement re-initialisation
-        gzwarn << "ArduPilot controller has reset\n";
-    }
-
-    // check for duplicate frame
-    else if (pkt.frame_count == this->dataPtr->fcu_frame_count)
-    {
-        gzwarn << "Duplicate input frame\n";
-
-        // for lock-step resend last state rather than ignore
-        if (this->dataPtr->isLockStep)
-        {
-            this->SendState();
-        }
-
-        return false;
-    }
-
-    // check for skipped frames
-    else if (pkt.frame_count != this->dataPtr->fcu_frame_count + 1
-        && this->dataPtr->arduPilotOnline)
-    {
-        gzwarn << "Missed "
-            << pkt.frame_count - this->dataPtr->fcu_frame_count
-            << " input frames\n";
-    }
-
-    // update frame count
-    this->dataPtr->fcu_frame_count = pkt.frame_count;
-
-    // reset the connection timeout so we don't accumulate
-    this->dataPtr->connectionTimeoutCount = 0;
-
-    this->UpdateMotorCommands(pkt);
-
-    return true;
+  return true;
 }
 
 /////////////////////////////////////////////////
-void gz::sim::systems::ArduPilotPlugin::UpdateMotorCommands(
+void gz::sim::systems::ArduPilotCyphalPlugin::UpdateMotorCommands(
     const servo_packet &_pkt)
 {
     // compute command based on requested motorSpeed
@@ -1502,9 +1314,9 @@ void gz::sim::systems::ArduPilotPlugin::UpdateMotorCommands(
 }
 
 /////////////////////////////////////////////////
-void gz::sim::systems::ArduPilotPlugin::CreateStateJSON(
+void gz::sim::systems::ArduPilotCyphalPlugin::ProcessCyphal(
     double _simTime,
-    const gz::sim::EntityComponentManager &_ecm) const
+    const gz::sim::EntityComponentManager &_ecm)
 {
     // Make a local copy of the latest IMU data (it's filled in
     // on receipt by ImuCb()).
@@ -1519,12 +1331,6 @@ void gz::sim::systems::ArduPilotPlugin::CreateStateJSON(
         imuMsg = this->dataPtr->imuMsg;
     }
 
-    // it is assumed that the imu orientation conforms to the
-    // aircraft convention:
-    //   x-forward
-    //   y-right
-    //   z-down
-
     // get linear acceleration
     gz::math::Vector3d linearAccel{
         imuMsg.linear_acceleration().x(),
@@ -1534,90 +1340,10 @@ void gz::sim::systems::ArduPilotPlugin::CreateStateJSON(
 
     // get angular velocity
     gz::math::Vector3d angularVel{
-        imuMsg.angular_velocity().x(),
-        imuMsg.angular_velocity().y(),
-        imuMsg.angular_velocity().z(),
+        imuMsg.angular_velocity().x() * 0.8,
+        imuMsg.angular_velocity().y() * 0.8,
+        imuMsg.angular_velocity().z() * 0.8,
     };
-
-    /*
-      Gazebo versus ArduPilot frame conventions
-      =========================================
-
-      1. ArduPilot assumes an aircraft convention for body and world frames:
-
-        ArduPilot world frame is: x-north, y-east, z-down (NED)
-        ArduPilot body frame is:  x-forward, y-right, z-down
-
-      2. The Gazebo frame convention is:
-
-        Gazebo world frame is:    x-east, y-north, z-up (ENU)
-        Gazebo body frame is:     x-forward, y-left, z-up
-
-        Reference:
-          https://gazebosim.org/api/gazebo/7.0/spherical_coordinates.html
-
-        In some cases the Gazebo body frame may use a non-standard convention,
-        for example the Zephyr delta wing model has x-left, y-back, z-up.
-
-      3. The position and orientation provided to ArduPilot must be given as the
-      transform from the Aircraft world frame to the Aircraft body frame.
-      We denote this as:
-
-        wldAToBdyA = ^{w_A}\xi_{b_A}
-
-      By which we mean that a vector expressed in Aircraft body frame
-      coordinates may be represented in Aircraft world frame coordinates by
-      the transform:
-
-        ^{wldA}v = ^{wldA}\xi_{bdyA} ^{bdyA}v
-                 = ^{wldA}rot_{bdyA} ^{bdyA}v + ^{wldA}pos_{bdyA}
-
-      i.e. a rotation from the world to body frame followed by a translation.
-
-      Combining transforms
-      ====================
-
-      1. Gazebo supplies us with the transform from the Gazebo world frame
-      to the Gazebo body frame (which we recall may be non-standard)
-
-        wldGToBdyG = ^{wldG}\xi_{bdyG}
-
-      2. The transform from the Aircraft world frame to the Gazebo world frame
-      is fixed (provided Gazebo does not modify its convention)
-
-        wldAToWldG = ^{wldA}\xi_{wldG} = Pose3d(0, 0, 0, -GZ_PI, 0, 0)
-
-      Note that this is the inverse of the plugin parameter <gazeboXYZToNED>
-      which tells us how to rotate a Gazebo world frame into an Aircraft
-      world frame.
-
-      3. The transform from the Aircraft body frame to the Gazebo body frame
-      is denoted:
-
-        bdyAToBdyG = ^{bdyA}\xi_{bdyG}
-
-      This will typically be Pose3d(0, 0, 0, -GZ_PI, 0, 0) but in some cases
-      will vary. For instance the Zephyr uses the transform
-      Pose3d(0, 0, 0, -GZ_PI, 0, GZ_PI/2)
-
-      Note this is also the inverse of the plugin parameter
-      <modelXYZToAirplaneXForwardZDown> which tells us how to rotate a Gazebo
-      model frame into an Aircraft body frame
-
-      4. Finally we compose the transforms to get the one required for the
-      ArduPilot JSON interface:
-
-        ^{wldA}\xi_{bdyA} = ^{wldA}\xi_{wldG} * ^{wldG}\xi_{bdyG}
-                          * (^{bdyA}\xi_{bdyG})^{-1}
-
-      where we use:
-
-        ^{bdyG}\xi_{bdyA} = (^{bdyA}\xi_{bdyG})^{-1}
-
-      In C++ variables names this is:
-
-        wldAToBdyA = wldAToWldG * wldGToBdyG * bdyAToBdyG.Inverse()
-    */
 
     // get pose and velocity in Gazebo world frame
     const gz::sim::components::WorldPose* worldPose =
@@ -1643,121 +1369,33 @@ void gz::sim::systems::ArduPilotPlugin::CreateStateJSON(
     // require the duration since sim start in seconds
     double timestamp = _simTime;
 
-    // build JSON document
-    rapidjson::StringBuffer s;
-    rapidjson::Writer<rapidjson::StringBuffer> writer(s);
+    const std::array<double, 3> local_position = {wldAToBdyA.Pos().X(), wldAToBdyA.Pos().Y(), wldAToBdyA.Pos().Z()};
+    const std::array<double, 3> linear_vel = {velWldA.X() * 0.8, velWldA.Y() * 0.8, velWldA.Z() * 0.8};
+    const std::array<double, 3> linear_accel = {linearAccel.X(), linearAccel.Y(), linearAccel.Z()};
+    const std::array<double, 4> orientation_wxyz = {wldAToBdyA.Rot().W(), wldAToBdyA.Rot().X(), wldAToBdyA.Rot().Y(), wldAToBdyA.Rot().Z()};
+    const std::array<double, 3> ang_vel = {angularVel.X(), angularVel.Y(), angularVel.Z()};
 
-    writer.StartObject();
+    gz::math::Vector3d mag{232, 52, -528};
+    auto mag_rotated = wldAToBdyA.Rot().RotateVectorReverse(mag);
+    uavcan_si_sample_magnetic_field_strength_Vector3_1_0 mag_tesla;
+    mag_tesla.tesla[0] = 1e-07 * mag_rotated[0];
+    mag_tesla.tesla[1] = 1e-07 * mag_rotated[1];
+    mag_tesla.tesla[2] = 1e-07 * mag_rotated[2];
 
-    writer.Key("timestamp");
-    writer.Double(timestamp);
-
-    writer.Key("imu");
-    writer.StartObject();
-    writer.Key("gyro");
-    writer.StartArray();
-    writer.Double(angularVel.X());
-    writer.Double(angularVel.Y());
-    writer.Double(angularVel.Z());
-    writer.EndArray();
-    writer.Key("accel_body");
-    writer.StartArray();
-    writer.Double(linearAccel.X());
-    writer.Double(linearAccel.Y());
-    writer.Double(linearAccel.Z());
-    writer.EndArray();
-    writer.EndObject();
-
-    writer.Key("position");
-    writer.StartArray();
-    writer.Double(wldAToBdyA.Pos().X());
-    writer.Double(wldAToBdyA.Pos().Y());
-    writer.Double(wldAToBdyA.Pos().Z());
-    writer.EndArray();
-
-    // ArduPilot quaternion convention: q[0] = 1 for identity.
-    writer.Key("quaternion");
-    writer.StartArray();
-    writer.Double(wldAToBdyA.Rot().W());
-    writer.Double(wldAToBdyA.Rot().X());
-    writer.Double(wldAToBdyA.Rot().Y());
-    writer.Double(wldAToBdyA.Rot().Z());
-    writer.EndArray();
-
-    writer.Key("velocity");
-    writer.StartArray();
-    writer.Double(velWldA.X());
-    writer.Double(velWldA.Y());
-    writer.Double(velWldA.Z());
-    writer.EndArray();
-
-    // Range sensor
-    {
-      // Aquire lock on this->dataPtr->ranges
-      std::lock_guard<std::mutex> lock(this->dataPtr->rangeMsgMutex);
-
-      // Assume that all range sensors with index less than
-      // ranges.size() provide data.
-      // Use switch-case fall-through to set each range sensor
-      switch (std::min<size_t>(6, this->dataPtr->ranges.size()))
-      {
-      case 6:
-          writer.Key("rng_6");
-          writer.Double(this->dataPtr->ranges[5]);
-      case 5:
-          writer.Key("rng_5");
-          writer.Double(this->dataPtr->ranges[4]);
-      case 4:
-          writer.Key("rng_4");
-          writer.Double(this->dataPtr->ranges[3]);
-      case 3:
-          writer.Key("rng_3");
-          writer.Double(this->dataPtr->ranges[2]);
-      case 2:
-          writer.Key("rng_2");
-          writer.Double(this->dataPtr->ranges[1]);
-      case 1:
-          writer.Key("rng_1");
-          writer.Double(this->dataPtr->ranges[0]);
-      default:
-          break;
-      }
+  static uint32_t process_counter = 0;
+  process_counter++;
+  std::chrono::steady_clock::time_point time_now = std::chrono::steady_clock::now();
+  static std::chrono::steady_clock::time_point last_hint_time = std::chrono::steady_clock::now();
+  uint32_t elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(time_now - last_hint_time).count();
+  if (elapsed_ms > 1000) {
+    if (process_counter < 400) {
+      gzwarn << "process_counter:" << process_counter << "\n";
+    } else {
+      gzmsg << "process_counter:" << process_counter << "\n";
     }
+    last_hint_time = time_now;
+    process_counter = 0;
+  }
 
-    // SITL/SIM_JSON supports these additional sensor fields
-    //      windvane : { direction: 0, speed: 0 }
-
-    // writer.Key("windvane");
-    // writer.StartObject();
-    // writer.Key("direction");
-    // writer.Double(1.57079633);
-    // writer.Key("speed");
-    // writer.Double(5.5);
-    // writer.EndObject();
-
-    writer.EndObject();
-
-    // get JSON
-    this->dataPtr->json_str = "\n" + std::string(s.GetString()) + "\n";
-    // gzdbg << this->dataPtr->json_str << "\n";
-}
-
-/////////////////////////////////////////////////
-void gz::sim::systems::ArduPilotPlugin::SendState() const
-{
-#if DEBUG_JSON_IO
-    auto bytes_sent =
-#endif
-    this->dataPtr->sock.sendto(
-        this->dataPtr->json_str.c_str(),
-        this->dataPtr->json_str.size(),
-        this->dataPtr->fcu_address,
-        this->dataPtr->fcu_port_out);
-
-#if DEBUG_JSON_IO
-    gzdbg << "sent " << bytes_sent <<  " bytes to "
-        << this->dataPtr->fcu_address << ":"
-        << this->dataPtr->fcu_port_out << "\n"
-        << "frame_count: " << this->dataPtr->fcu_frame_count << "\n";
-#endif
+  cyphal_application.process(local_position, linear_vel, linear_accel, orientation_wxyz, ang_vel, mag_tesla);
 }
